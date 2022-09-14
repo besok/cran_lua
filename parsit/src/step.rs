@@ -304,6 +304,13 @@ impl<'a, T> StepResult<'a, T> {
             other => other,
         }
     }
+
+    pub fn map_error<R,E>(self, mapper:E) -> Option<R> where E: FnOnce(ParseError<'a>) -> R {
+        match self {
+            Error(e) => Some(mapper(e)),
+            other => None
+        }
+    }
 }
 
 impl<'a, T> StepResult<'a, T> {

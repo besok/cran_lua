@@ -53,9 +53,51 @@ impl<'a, Token> ParseIt<'a, Token>
     }
 }
 
+/// The token is used as a stub for the parsing operations when we need just a notion
+/// that the token is parsed correctly but we don't need to process any values.
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct EmptyToken {}
 
+/// Helps to parse a token on the lexer level
+///  - Typically, it takes a token from the parser(defined in the structure of Logos)
+///  - The structure should implement `PartialEq`
+///
+/// # Examples
+/// - create a pattern matching for the given tokens
+/// ```
+///     use logos::Logos;
+///     use crate::parsit::parser::ParseIt;
+///     use crate::parsit::token;
+///     use crate::parsit::step::StepResult;
+///     use crate::parsit::parser::EmptyToken;
+///     #[derive(Logos,PartialEq)]
+///     pub enum TFQ {
+///         #[token("true")]
+///         True,
+///         #[token("false")]
+///         False,
+///
+///         #[token("?")]
+///         Question,
+///
+///
+///         #[error]
+///         Error,
+///     }
+///
+///     let p:ParseIt<TFQ> = ParseIt::new("true?").unwrap();
+///     // create a pattern matching for the given tokens
+///      token!(
+///         p.token(0) =>
+///             TFQ::True => true,
+///             TFQ::False => false
+///      );
+///     // create a matching for only one token without a result (*it is used oftenly with then()*).
+///     // The EmptyToken will be return
+///      token!(p.token(1) => TFQ::Question);
+///
+/// ```
+///
 #[macro_export]
 macro_rules! token {
   ($obj:expr => $($matcher:pat $(if $pred:expr)* => $result:expr),*) => {
