@@ -1,4 +1,4 @@
-use parsit::parser::ParseIt;
+mod parser;
 
 fn main() {
     println!("Hello, world!");

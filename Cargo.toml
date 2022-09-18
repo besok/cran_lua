@@ -13,4 +13,5 @@ categories = ["api-bindings", "compilers", "parsing"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-parsit = {path = "parsit", version = "0.1.0"}
+parsit = {path = "../parseit"}
+logos = "0.12.1"
