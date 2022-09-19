@@ -1,5 +1,4 @@
 use logos::{FilterResult, Lexer, Logos};
-use logos::internal::CallbackResult;
 use logos::skip;
 use crate::parser::ast::Number;
 
@@ -8,7 +7,7 @@ use crate::parser::ast::Number;
 #[logos(subpattern digit = r"[0-9]([0-9_]*[0-9])?")]
 #[logos(subpattern letter = r"[a-zA-Z_]")]
 #[logos(subpattern exp = r"[eE][+-]?[0-9]+")]
-enum Token<'a> {
+pub enum Token<'a> {
     #[regex(r"(?&letter)((?&letter)|(?&digit))*")]
     Id(&'a str),
 
