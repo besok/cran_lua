@@ -3,7 +3,7 @@ use parsit::parser::ParseIt;
 use parsit::step::Step;
 use parsit::token;
 use parsit::parser::EmptyToken;
-use crate::parser::ast::{Bool, Expression, Field, FieldKey, Id, Nil, Number, TableConst, Text};
+use crate::parser::ast::{Args, Bool, Expression, Field, FieldKey, FnParams, Id, NameArgs, Nil, Number, TableConst, Text};
 use crate::parser::tokens::Token;
 
 mod tokens;
@@ -86,6 +86,80 @@ impl<'a> LuaParser<'a> {
             .take_left()
             .map(|fields| TableConst { fields })
     }
+
+    fn names(&'a self, pos: usize) -> Step<'a, Vec<Id<'a>>> {
+        let tail = |p: usize| {
+            token!(self.t(p) => Token::Comma)
+                .then(|p| self.id(p))
+        };
+
+        self.id(pos)
+            .then_multi_zip(tail)
+            .merge()
+    }
+
+    fn params(&'a self, pos: usize) -> Step<'a, FnParams<'a>> {
+        let varags = |p: usize|
+            token!(self.t(p) => Token::Comma)
+                .then(|p| token!(self.t(p) => Token::EllipsisOut))
+                .or_none();
+
+        let transform = |(names, vargs): (Vec<Id<'a>>, Option<EmptyToken>)| {
+            if vargs.is_some() {
+                FnParams::WithVarArgs(names)
+            } else { FnParams::Args(names) }
+        };
+
+
+        self.names(pos)
+            .then_or_none_zip(varags)
+            .map(transform)
+            .or_from(pos)
+            .or(|p| token!(self.t(p) => Token::EllipsisOut).map(|_| FnParams::VarArgs))
+            .into()
+    }
+    fn fn_params(&'a self, pos: usize) -> Step<'a, FnParams<'a>> {
+        token!(self.t(pos) => Token::LParen)
+            .then_or_default(|p| self.params(p))
+            .then_zip(|p| token!(self.t(p) => Token::RParen))
+            .take_left()
+    }
+
+    fn name_args(&'a self, pos: usize) -> Step<'a, NameArgs<'a>> {
+        let args = |p| {
+            let exprs = |p| {
+                self.expr(p)
+                    .then_multi_zip(|p|
+                        token!(self.t(p) => Token::Comma)
+                            .then(|p| self.expr(p)))
+                    .merge()
+            };
+
+
+            let expr_args = token!(self.t(p) => Token::LParen)
+                .then_or_val(exprs, vec![])
+                .then_zip(|p| token!(self.t(p) => Token::RParen))
+                .take_left()
+                .map(Args::Expressions);
+
+
+            let step: Step<'a, Args> = expr_args
+                .or_from(p)
+                .or(|p| self.table_const(p).map(Args::Constructor))
+                .or(|p| self.text(p).map(Args::String))
+                .into();
+            step
+        };
+
+        let name = token!(self.t(pos) => Token::Colon).then(|p| self.id(p));
+        name.or_none().then_zip(args).map(|(opt,args)|{
+            if opt.is_some(){
+                NameArgs::NameArgs(opt.unwrap(),args)
+            } else{
+                NameArgs::Args(args)
+            }
+        })
+    }
 }
 
 impl<'a> LuaParser<'a> {
@@ -103,7 +177,7 @@ impl<'a> LuaParser<'a> {
 mod tests {
     use parsit::step::Step;
     use parsit::test::parser_test::*;
-    use crate::parser::ast::{Expression, Field, FieldKey, Id, TableConst, Text};
+    use crate::parser::ast::{Expression, Field, FieldKey, FnParams, Id, TableConst, Text};
     use crate::parser::ast::Field::{Pair, Value};
     use crate::parser::LuaParser;
     use crate::parser::tokens::Token;
@@ -159,9 +233,37 @@ mod tests {
                        Pair(FieldKey::Expr(Expression::E("")), Expression::E("")),
                        Pair(FieldKey::Expr(Expression::E("")), Expression::E("")),
                        Pair(FieldKey::Expr(Expression::E("")), Expression::E("")),
-                       Pair(FieldKey::Id(Id { v: "some_id" }), Expression::E(""))
+                       Pair(FieldKey::Id(Id { v: "some_id" }), Expression::E("")),
                    ]
                });
+    }
+
+    #[test]
+    fn params() {
+        expect(p("...").params(0), FnParams::VarArgs);
+        expect(p("a").params(0), FnParams::Args(vec![Id::new("a")]));
+        expect(p("a,b").params(0), FnParams::Args(vec![Id::new("a"), Id::new("b")]));
+        expect(p("a,b, ... ").params(0), FnParams::WithVarArgs(vec![Id::new("a"), Id::new("b")]));
+    }
+
+    #[test]
+    fn fn_params() {
+        expect(p("()").fn_params(0), FnParams::Args(vec![]));
+        expect(p("(...)").fn_params(0), FnParams::VarArgs);
+        expect(p("(a)").fn_params(0), FnParams::Args(vec![Id::new("a")]));
+        expect(p("(a,b)").fn_params(0), FnParams::Args(vec![Id::new("a"), Id::new("b")]));
+        expect(p("(a,b, ... )").fn_params(0), FnParams::WithVarArgs(vec![Id::new("a"), Id::new("b")]));
+    }
+    #[test]
+    fn name_args() {
+        expect_pos(p(": name \"a\"").name_args(0), 3);
+        expect_pos(p("\"a\"").name_args(0), 1);
+        expect_pos(p(": name (>=,>=)").name_args(0), 7);
+        expect_pos(p(" (>=,>=)").name_args(0), 5);
+        expect_pos(p(": name (>=,>=)").name_args(0), 7);
+        expect_pos(p(" (>=,>=)").name_args(0), 5);
+        expect_pos(p(": name {[>=] = >=}").name_args(0), 9);
+        expect_pos(p("{[>=] = >=}").name_args(0), 7);
     }
 
     #[test]
