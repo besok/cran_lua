@@ -1,7 +1,7 @@
 use parsit::error::ParseError;
 use parsit::parser::ParseIt;
 use parsit::step::Step;
-use parsit::token;
+use parsit::{seq, token, wrap};
 use parsit::parser::EmptyToken;
 use crate::parser::ast::{Args, Bool, Expression, Field, FieldKey, FnParams, Id, NameArgs, Nil, Number, TableConst, Text};
 use crate::parser::tokens::Token;
@@ -72,30 +72,20 @@ impl<'a> LuaParser<'a> {
             step
         };
 
-        let fields = |p| {
-            field(p)
-                .then_multi_zip(|p| sep(p).then(field))
-                .then_or_none_zip(|p| sep(p).or_none())
-                .take_left()
-                .merge()
-        };
+        let fields = |p| seq!(p => field, sep,);
 
-        token!(self.t(pos) => Token::LBrace)
-            .then_or_val(fields, vec![])
-            .then_zip(|p| token!(self.t(p) => Token::RBrace))
-            .take_left()
+        let l_brace = |p: usize| token!(self.t(p) => Token::LBrace);
+        let r_brace = |p: usize| token!(self.t(p) => Token::RBrace);
+        let empt_vec = vec![];
+
+        wrap!(pos => l_brace; fields or empt_vec; r_brace)
             .map(|fields| TableConst { fields })
     }
 
     fn names(&'a self, pos: usize) -> Step<'a, Vec<Id<'a>>> {
-        let tail = |p: usize| {
-            token!(self.t(p) => Token::Comma)
-                .then(|p| self.id(p))
-        };
-
-        self.id(pos)
-            .then_multi_zip(tail)
-            .merge()
+        let comma = |p:usize|   token!(self.t(p) => Token::Comma);
+        let id = |p:usize|   self.id(p);
+        seq!(pos => id, comma)
     }
 
     fn params(&'a self, pos: usize) -> Step<'a, FnParams<'a>> {
@@ -119,12 +109,13 @@ impl<'a> LuaParser<'a> {
             .into()
     }
     fn fn_params(&'a self, pos: usize) -> Step<'a, FnParams<'a>> {
-        token!(self.t(pos) => Token::LParen)
-            .then_or_default(|p| self.params(p))
-            .then_zip(|p| token!(self.t(p) => Token::RParen))
-            .take_left()
-    }
+        let l = |p:usize|    token!(self.t(p) => Token::LParen);
+        let r = |p:usize|    token!(self.t(p) => Token::RParen);
+        let params = |p:usize| self.params(p);
+        let def = FnParams::default();
 
+        wrap!(pos => l;params or def;r)
+    }
     fn name_args(&'a self, pos: usize) -> Step<'a, NameArgs<'a>> {
         let args = |p| {
             let exprs = |p| {
@@ -152,10 +143,10 @@ impl<'a> LuaParser<'a> {
         };
 
         let name = token!(self.t(pos) => Token::Colon).then(|p| self.id(p));
-        name.or_none().then_zip(args).map(|(opt,args)|{
-            if opt.is_some(){
-                NameArgs::NameArgs(opt.unwrap(),args)
-            } else{
+        name.or_none().then_zip(args).map(|(opt, args)| {
+            if opt.is_some() {
+                NameArgs::NameArgs(opt.unwrap(), args)
+            } else {
                 NameArgs::Args(args)
             }
         })
@@ -254,6 +245,7 @@ mod tests {
         expect(p("(a,b)").fn_params(0), FnParams::Args(vec![Id::new("a"), Id::new("b")]));
         expect(p("(a,b, ... )").fn_params(0), FnParams::WithVarArgs(vec![Id::new("a"), Id::new("b")]));
     }
+
     #[test]
     fn name_args() {
         expect_pos(p(": name \"a\"").name_args(0), 3);

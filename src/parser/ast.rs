@@ -72,4 +72,9 @@ pub enum NameArgs<'a>{
     Args(Args<'a>),
     NameArgs(Id<'a>,Args<'a>),
 }
+#[derive(Debug, Clone, PartialEq)]
+pub enum VarSuffix<'a>{
+    Expr(Vec<NameArgs<'a>>, Expression<'a>),
+    Id(Vec<NameArgs<'a>>, Id<'a>),
+}
 
