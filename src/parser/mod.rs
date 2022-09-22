@@ -3,7 +3,7 @@ use parsit::parser::ParseIt;
 use parsit::step::Step;
 use parsit::{seq, token, wrap};
 use parsit::parser::EmptyToken;
-use crate::parser::ast::{Args, Bool, Expression, Field, FieldKey, FnParams, Id, NameArgs, Nil, Number, TableConst, Text};
+use crate::parser::ast::{Args, Bool, Expression, Field, FieldKey, FnCall, FnName, FnParams, Id, NameArgs, Nil, Number, Suffix, TableConst, Text, Var, VarHead, VarOrExpr, VarSuffix};
 use crate::parser::tokens::Token;
 
 mod tokens;
@@ -72,7 +72,7 @@ impl<'a> LuaParser<'a> {
             step
         };
 
-        let fields = |p| seq!(p => field, sep,);
+        let fields = |p| seq!(p => field, sep);
 
         let l_brace = |p: usize| token!(self.t(p) => Token::LBrace);
         let r_brace = |p: usize| token!(self.t(p) => Token::RBrace);
@@ -83,8 +83,8 @@ impl<'a> LuaParser<'a> {
     }
 
     fn names(&'a self, pos: usize) -> Step<'a, Vec<Id<'a>>> {
-        let comma = |p:usize|   token!(self.t(p) => Token::Comma);
-        let id = |p:usize|   self.id(p);
+        let comma = |p: usize| token!(self.t(p) => Token::Comma);
+        let id = |p: usize| self.id(p);
         seq!(pos => id, comma)
     }
 
@@ -108,27 +108,35 @@ impl<'a> LuaParser<'a> {
             .or(|p| token!(self.t(p) => Token::EllipsisOut).map(|_| FnParams::VarArgs))
             .into()
     }
+
+    fn expr_list(&'a self, pos: usize) -> Step<'a, Vec<Expression<'a>>> {
+        let e = |p: usize| self.expr(p);
+        let comma = |p: usize| token!(self.t(p) => Token::Comma);
+        seq!(pos => e,comma)
+    }
+    fn id_list(&'a self, pos: usize) -> Step<'a, Vec<Id<'a>>> {
+        let id = |p: usize| self.id(p);
+        let comma = |p: usize| token!(self.t(p) => Token::Comma);
+        seq!(pos => id,comma)
+    }
+    fn var_list(&'a self, pos: usize) -> Step<'a, Vec<Var<'a>>> {
+        let v = |p: usize| self.var(p);
+        let comma = |p: usize| token!(self.t(p) => Token::Comma);
+        seq!(pos => v,comma)
+    }
+
     fn fn_params(&'a self, pos: usize) -> Step<'a, FnParams<'a>> {
-        let l = |p:usize|    token!(self.t(p) => Token::LParen);
-        let r = |p:usize|    token!(self.t(p) => Token::RParen);
-        let params = |p:usize| self.params(p);
+        let l = |p: usize| token!(self.t(p) => Token::LParen);
+        let r = |p: usize| token!(self.t(p) => Token::RParen);
+        let params = |p: usize| self.params(p);
         let def = FnParams::default();
 
         wrap!(pos => l;params or def;r)
     }
     fn name_args(&'a self, pos: usize) -> Step<'a, NameArgs<'a>> {
         let args = |p| {
-            let exprs = |p| {
-                self.expr(p)
-                    .then_multi_zip(|p|
-                        token!(self.t(p) => Token::Comma)
-                            .then(|p| self.expr(p)))
-                    .merge()
-            };
-
-
             let expr_args = token!(self.t(p) => Token::LParen)
-                .then_or_val(exprs, vec![])
+                .then_or_default(|p| self.expr_list(p))
                 .then_zip(|p| token!(self.t(p) => Token::RParen))
                 .take_left()
                 .map(Args::Expressions);
@@ -141,15 +149,81 @@ impl<'a> LuaParser<'a> {
                 .into();
             step
         };
-
         let name = token!(self.t(pos) => Token::Colon).then(|p| self.id(p));
         name.or_none().then_zip(args).map(|(opt, args)| {
-            if opt.is_some() {
-                NameArgs::NameArgs(opt.unwrap(), args)
+            if let Some(v) = opt {
+                NameArgs::NameArgs(v, args)
             } else {
                 NameArgs::Args(args)
             }
         })
+    }
+    fn var_suffix(&'a self, pos: usize) -> Step<'a, VarSuffix<'a>> {
+        let lb = |p: usize| token!(self.t(p) => Token::LBrack);
+        let rb = |p: usize| token!(self.t(p) => Token::RBrack);
+        let e = |p: usize| self.expr(p);
+
+        let expr = |p: usize| wrap!(p => lb;e;rb).map(Suffix::Expr);
+        let name = |p: usize| {
+            token!(self.t(p) => Token::Dot).then(|p| self.id(p)).map(Suffix::Id)
+        };
+
+
+        self.p.zero_or_more(pos, |p| self.name_args(p))
+            .then_zip(|p| expr(p).or_from(p).or(name).into())
+            .map(|(a, r)| VarSuffix { var: a, suffix: r })
+    }
+    fn var(&'a self, pos: usize) -> Step<'a, Var<'a>> {
+        let lp = |p: usize| token!(self.t(p) => Token::LParen);
+        let rp = |p: usize| token!(self.t(p) => Token::RParen);
+        let e = |p: usize| self.expr(p);
+        let expr = |p: usize| {
+            wrap!(p => lp;e;rp)
+                .then_zip(|p| self.var_suffix(p))
+                .map(|(e, s)| VarHead::Expr(e, s))
+        };
+
+        self.id(pos)
+            .map(VarHead::Id)
+            .or(expr)
+            .then_zip(|p| self.p.zero_or_more(p, |p| self.var_suffix(p)))
+            .map(|(head, tail)| Var { head, tail })
+    }
+    fn var_or_expr(&'a self, pos: usize) -> Step<'a, VarOrExpr<'a>> {
+        let lp = |p: usize| token!(self.t(p) => Token::LParen);
+        let rp = |p: usize| token!(self.t(p) => Token::RParen);
+        let e = |p: usize| self.expr(p);
+        let expr = |p: usize| {
+            wrap!(p => lp;e;rp)
+                .map(VarOrExpr::Expr)
+        };
+
+        self.var(pos)
+            .map(VarOrExpr::Var)
+            .or_from(pos)
+            .or(expr)
+            .into()
+    }
+    fn fn_call(&'a self, pos: usize) -> Step<'a, FnCall<'a>> {
+        self.var_or_expr(pos)
+            .then_zip(|p| self.p.one_or_more(p, |p| self.name_args(p)))
+            .map(|(head, args)| FnCall { head, args })
+    }
+    fn fn_name(&'a self, pos: usize) -> Step<'a, FnName<'a>> {
+        let id = |p: usize| self.id(p);
+        let c = |p: usize| token!(self.t(p) => Token::Dot);
+        let end = |p: usize| token!(self.t(p) => Token::Colon).then(id);
+
+        seq!(pos => id,c)
+            .then_or_none_zip(|p| end(p).or_none())
+            .map(|(mut names, end)| {
+                if let Some(v) = end {
+                    names.push(v);
+                    FnName { names, with_self: true }
+                } else {
+                    FnName { names, with_self: false }
+                }
+            })
     }
 }
 
@@ -247,6 +321,15 @@ mod tests {
     }
 
     #[test]
+    fn var_suffix() {
+        expect_pos(p(": name (>=,>=) [>=]").var_suffix(0), 10);
+        expect_pos(p(": name (>=,>=) .id").var_suffix(0), 9);
+        expect_pos(p(": name (>=,>=) : name (>=,>=) [>=]").var_suffix(0), 17);
+        expect_pos(p("[>=]").var_suffix(0), 3);
+        expect_pos(p(".id").var_suffix(0), 2);
+    }
+
+    #[test]
     fn name_args() {
         expect_pos(p(": name \"a\"").name_args(0), 3);
         expect_pos(p("\"a\"").name_args(0), 1);
@@ -261,5 +344,12 @@ mod tests {
     #[test]
     fn expr_test() {
         expect(p(">=").expr(0), Expression::E(""))
+    }
+    #[test]
+    fn fn_name_test() {
+        expect_pos(p("a.b.c").fn_name(0), 5);
+        expect_pos(p("a").fn_name(0), 1);
+        expect_pos(p("a:b").fn_name(0), 3);
+        expect_pos(p("a.b:c").fn_name(0), 5);
     }
 }

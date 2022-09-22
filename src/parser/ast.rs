@@ -73,8 +73,41 @@ pub enum NameArgs<'a>{
     NameArgs(Id<'a>,Args<'a>),
 }
 #[derive(Debug, Clone, PartialEq)]
-pub enum VarSuffix<'a>{
-    Expr(Vec<NameArgs<'a>>, Expression<'a>),
-    Id(Vec<NameArgs<'a>>, Id<'a>),
+pub struct  VarSuffix<'a>{
+    pub var:Vec<NameArgs<'a>>,
+    pub suffix:Suffix<'a>
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum Suffix<'a>{
+    Expr( Expression<'a>),
+    Id( Id<'a>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum VarHead<'a>{
+    Expr(Expression<'a>,VarSuffix<'a>),
+    Id( Id<'a>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct  Var<'a>{
+    pub head:VarHead<'a>,
+    pub tail:Vec<VarSuffix<'a>>
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum VarOrExpr<'a>{
+    Expr(Expression<'a>),
+    Var(Var<'a>),
+}
+#[derive(Debug, Clone, PartialEq)]
+pub struct FnCall<'a>{
+    pub head:VarOrExpr<'a>,
+    pub args:Vec<NameArgs<'a>>
+}
+
+pub struct FnName<'a>{
+    pub names: Vec<Id<'a>>,
+    pub with_self:bool
+}
