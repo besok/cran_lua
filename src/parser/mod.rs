@@ -3,7 +3,7 @@ use parsit::parser::ParseIt;
 use parsit::step::Step;
 use parsit::{seq, token, wrap};
 use parsit::parser::EmptyToken;
-use crate::parser::ast::{Args, Bool, Expression, Field, FieldKey, FnCall, FnName, FnParams, Id, NameArgs, Nil, Number, Suffix, TableConst, Text, Var, VarHead, VarOrExpr, VarSuffix};
+use crate::parser::ast::{Args, AttrName, Bool, Expression, Field, FieldKey, FnCall, FnName, FnParams, Id, NameArgs, Nil, Number, Suffix, TableConst, Text, Var, VarHead, VarOrExpr, VarSuffix};
 use crate::parser::tokens::Token;
 
 mod tokens;
@@ -123,6 +123,26 @@ impl<'a> LuaParser<'a> {
         let v = |p: usize| self.var(p);
         let comma = |p: usize| token!(self.t(p) => Token::Comma);
         seq!(pos => v,comma)
+    }
+    fn attr_name_list(&'a self, pos: usize) -> Step<'a, Vec<AttrName<'a>>> {
+        let attr = |p: usize| {
+            let l = |p: usize| { token!(self.t(p) => Token::Lt) };
+            let r = |p: usize| { token!(self.t(p) => Token::Gt) };
+            let id = |p: usize| { self.id(p) };
+
+            id(p)
+                .then_or_none_zip(|p| wrap!(p => l;id;r).or_none())
+                .map(|(id, opt)| {
+                    if let Some(a) = opt {
+                        AttrName::AttrName(id, a)
+                    } else {
+                        AttrName::Name(id)
+                    }
+                })
+        };
+        let comma = |p: usize| token!(self.t(p) => Token::Comma);
+
+        seq!(pos => attr, comma)
     }
 
     fn fn_params(&'a self, pos: usize) -> Step<'a, FnParams<'a>> {
@@ -328,6 +348,12 @@ mod tests {
         expect_pos(p("[>=]").var_suffix(0), 3);
         expect_pos(p(".id").var_suffix(0), 2);
     }
+    #[test]
+    fn att_name_list_test() {
+        expect_pos(p("id").attr_name_list(0), 1);
+        expect_pos(p("id <id>").attr_name_list(0), 4);
+        expect_pos(p("id <id>,id <id>").attr_name_list(0), 9);
+    }
 
     #[test]
     fn name_args() {
@@ -345,6 +371,7 @@ mod tests {
     fn expr_test() {
         expect(p(">=").expr(0), Expression::E(""))
     }
+
     #[test]
     fn fn_name_test() {
         expect_pos(p("a.b.c").fn_name(0), 5);
