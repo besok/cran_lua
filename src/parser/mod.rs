@@ -3,7 +3,7 @@ use parsit::parser::ParseIt;
 use parsit::step::Step;
 use parsit::{seq, token, wrap};
 use parsit::parser::EmptyToken;
-use crate::parser::ast::{Args, AttrName, Bool, Expression, Field, FieldKey, FnCall, FnName, FnParams, Id, NameArgs, Nil, Number, Suffix, TableConst, Text, Var, VarHead, VarOrExpr, VarSuffix};
+use crate::parser::ast::{Args, AttrName, Block, Bool, Expression, ExprFor, Field, FieldKey, FnCall, FnDef, FnName, FnParams, For, Id, If, IfBranch, NameArgs, Nil, Number, PlainFor, Repeat, Statement, Suffix, TableConst, Text, Var, VarHead, VarOrExpr, VarSuffix, While};
 use crate::parser::tokens::Token;
 
 mod tokens;
@@ -245,6 +245,219 @@ impl<'a> LuaParser<'a> {
                 }
             })
     }
+
+    fn block(&'a self, pos: usize) -> Step<'a, Block<'a>> {
+        let return_s = |p: usize| {
+            token!(self.t(p) => Token::Return)
+                .then_or_default(|p| self.expr_list(p))
+                .then_or_none_zip(|p| token!(self.t(p) => Token::Semi).or_none())
+                .take_left()
+        };
+
+        self.p.zero_or_more(pos, |p| self.statement(p))
+            .then_or_none_zip(|p| return_s(p).or_none())
+            .map(|(sts, ret)| {
+                if let Some(r) = ret {
+                    Block::Return(sts, r)
+                } else {
+                    Block::Void(sts)
+                }
+            })
+    }
+
+    fn statement(&'a self, pos: usize) -> Step<'a, Statement<'a>> {
+        let fn_t = |p: usize| token!(self.t(p) => Token::Function);
+        let end_t = |p: usize| token!(self.t(p) => Token::End);
+        let block = |p: usize| self.block(p);
+        let local = |p: usize| token!(self.t(p) => Token::Local);
+        let id = |p: usize| self.id(p);
+        let do_t = |p: usize| token!(self.t(p) => Token::Do);
+        let expr = |p: usize| self.expr(p);
+        let then_t = |p: usize| token!(self.t(p) => Token::Then);
+
+        let empty = |p: usize| token!(self.t(p) => Token::Semi => Statement::Empty);
+        let assignment = |p: usize| {
+            self.var_list(p)
+                .then_zip(|p| self.expr_list(p))
+                .map(|(vs, es)| Statement::Assignment(vs, es))
+        };
+        let fn_call = |p: usize| self.fn_call(p).map(Statement::FnCall);
+        let label = |p: usize| {
+            let del = |p: usize| token!(self.t(p) => Token::DColon);
+            wrap!(p => del;id;del).map(Statement::Label)
+        };
+        let break_s = |p: usize| token!(self.t(p) => Token::Break => Statement::Break);
+        let goto = |p: usize| {
+            token!(self.t(p) => Token::Goto).then(|p| self.id(p)).map(Statement::Goto)
+        };
+
+        let do_s = |p: usize| {
+            wrap!(p => do_t;block;end_t).map(Statement::Do)
+        };
+
+        let while_s = |p: usize| {
+            let while_t = |p: usize| token!(self.t(p) => Token::While);
+            while_t(p)
+                .then(expr)
+                .then_zip(|p| wrap!(p => do_t;block;end_t))
+                .map(|(cond, body)|
+                    Statement::While(While { cond, body }))
+        };
+
+        let repeat_s = |p: usize| {
+            let repeat_t = |p: usize| token!(self.t(p) => Token::Repeat);
+            let until_t = |p: usize| token!(self.t(p) => Token::Until);
+
+            repeat_t(p)
+                .then(block)
+                .then_zip(until_t)
+                .take_left()
+                .then_zip(expr)
+                .map(|(body, until)| Statement::Repeat(Repeat { until, body }))
+        };
+
+        let if_s = |p: usize| {
+            let if_t = |p: usize| token!(self.t(p) => Token::If);
+            let else_if_t = |p: usize| token!(self.t(p) => Token::Elseif);
+            let else_t = |p: usize| token!(self.t(p) => Token::Else);
+
+            let if_main = |p: usize| {
+                wrap!(p => if_t;expr;then_t)
+                    .then_zip(block)
+                    .map(|(cond, body)| IfBranch { cond, body })
+            };
+            let else_if = |p: usize| {
+                wrap!(p => else_if_t;expr;then_t)
+                    .then_zip(block)
+                    .map(|(cond, body)| IfBranch { cond, body })
+            };
+            let else_b = |p: usize| {
+                else_t(p).then(block)
+            };
+
+            if_main(p)
+                .then_multi_zip(else_if)
+                .then_or_none_zip(|p| else_b(p).or_none())
+                .then_zip(end_t)
+                .take_left()
+                .map(|((main, elseifs), else_opt)| {
+                    if let Some(opt) = else_opt {
+                        Statement::If(If::IfElse(main, elseifs, opt))
+                    } else {
+                        Statement::If(If::If(main, elseifs))
+                    }
+                })
+        };
+
+        let for_s = |p: usize| {
+            let comma = |p: usize| token!(self.t(p) => Token::Comma);
+            let for_t = |p: usize| token!(self.t(p) => Token::For);
+            let in_t = |p: usize| token!(self.t(p) => Token::In);
+            let assign = |p: usize| token!(self.t(p) => Token::Assign);
+            let exprs = |p: usize| self.expr_list(p);
+
+            let names = |p: usize| self.names(p);
+
+            let plain = |p: usize| {
+                for_t(p)
+                    .then(id)
+                    .then_zip(assign)
+                    .take_left()
+                    .then_zip(expr)
+                    .then_zip(comma)
+                    .take_left()
+                    .then_zip(expr)
+                    .then_or_none_zip(|p| comma(p).then(expr).or_none())
+                    .then_zip(do_t).take_left()
+                    .then_zip(block)
+                    .then_zip(end_t).take_left()
+                    .map(|(((init, border), step), body)|
+                        Statement::For(For::Plain(PlainFor {
+                            init,
+                            border,
+                            step,
+                            body,
+                        })))
+            };
+            let col = |p: usize| {
+                for_t(p)
+                    .then(names)
+                    .then_zip(in_t).take_left()
+                    .then_zip(exprs)
+                    .then_zip(do_t).take_left()
+                    .then_zip(block)
+                    .then_zip(end_t).take_left()
+                    .map(|((names, expressions), body)|
+                        Statement::For(For::ForCol(ExprFor {
+                            names,
+                            expressions,
+                            body,
+                        })))
+            };
+            let res: Step<'a, Statement> = plain(p).or_from(p).or(col).into();
+            res
+        };
+
+        let function = |p: usize| {
+            let fn_name = |p: usize| self.fn_name(p);
+            let fn_params = |p: usize| self.fn_params(p);
+
+            fn_t(p)
+                .then(fn_name)
+                .then_zip(fn_params)
+                .then_zip(block)
+                .then_zip(end_t)
+                .take_left()
+                .map(|((name, params), body)| Statement::FnDef(FnDef {
+                    name,
+                    params,
+                    body,
+                }))
+        };
+        let local_function = |p: usize| {
+            let name = |p: usize| self.id(p);
+            let fn_params = |p: usize| self.fn_params(p);
+
+            local(p)
+                .then(fn_t)
+                .then(name)
+                .then_zip(fn_params)
+                .then_zip(block)
+                .then_zip(end_t)
+                .take_left()
+                .map(|((name, params), body)| Statement::LocalFnDef(FnDef {
+                    name: FnName { names: vec![name], with_self: false },
+                    params,
+                    body,
+                }))
+        };
+        let local_attrs = |p: usize| {
+            let attr_names = |p: usize| self.attr_name_list(p);
+            let assign = |p: usize| token!(self.t(p) => Token::Assign);
+            let exprs = |p: usize| self.expr_list(p);
+
+            local(p).then(attr_names)
+                .then_or_default_zip(|p|assign(p).then(exprs))
+                .map(|(attrs,exprs)|Statement::LocalAttrNames(attrs,exprs))
+        };
+
+        empty(pos).or_from(pos)
+            .or(assignment)
+            .or(fn_call)
+            .or(label)
+            .or(break_s)
+            .or(goto)
+            .or(do_s)
+            .or(while_s)
+            .or(repeat_s)
+            .or(if_s)
+            .or(for_s)
+            .or(function)
+            .or(local_function)
+            .or(local_attrs)
+            .into()
+
+    }
 }
 
 impl<'a> LuaParser<'a> {
@@ -348,6 +561,7 @@ mod tests {
         expect_pos(p("[>=]").var_suffix(0), 3);
         expect_pos(p(".id").var_suffix(0), 2);
     }
+
     #[test]
     fn att_name_list_test() {
         expect_pos(p("id").attr_name_list(0), 1);

@@ -172,14 +172,14 @@ pub enum If<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum For<'a> {
     Plain(PlainFor<'a>),
-    For(ExprFor<'a>),
+    ForCol(ExprFor<'a>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FnDef<'a> {
-    name: FnName<'a>,
-    params: FnParams<'a>,
-    body: Block<'a>,
+    pub name: FnName<'a>,
+    pub params: FnParams<'a>,
+    pub body: Block<'a>,
 }
 
 
