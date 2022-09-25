@@ -33,7 +33,7 @@ pub enum Token<'a> {
     Else,
     #[token("elseif")]
     Elseif,
-    #[token("edn")]
+    #[token("end")]
     End,
     #[token("false")]
     False,

@@ -274,10 +274,12 @@ impl<'a> LuaParser<'a> {
         let do_t = |p: usize| token!(self.t(p) => Token::Do);
         let expr = |p: usize| self.expr(p);
         let then_t = |p: usize| token!(self.t(p) => Token::Then);
+        let assign = |p: usize| token!(self.t(p) => Token::Assign);
 
         let empty = |p: usize| token!(self.t(p) => Token::Semi => Statement::Empty);
         let assignment = |p: usize| {
             self.var_list(p)
+                .then_zip(assign).take_left()
                 .then_zip(|p| self.expr_list(p))
                 .map(|(vs, es)| Statement::Assignment(vs, es))
         };
@@ -353,7 +355,6 @@ impl<'a> LuaParser<'a> {
             let comma = |p: usize| token!(self.t(p) => Token::Comma);
             let for_t = |p: usize| token!(self.t(p) => Token::For);
             let in_t = |p: usize| token!(self.t(p) => Token::In);
-            let assign = |p: usize| token!(self.t(p) => Token::Assign);
             let exprs = |p: usize| self.expr_list(p);
 
             let names = |p: usize| self.names(p);
@@ -361,11 +362,9 @@ impl<'a> LuaParser<'a> {
             let plain = |p: usize| {
                 for_t(p)
                     .then(id)
-                    .then_zip(assign)
-                    .take_left()
+                    .then_zip(assign).take_left()
                     .then_zip(expr)
-                    .then_zip(comma)
-                    .take_left()
+                    .then_zip(comma).take_left()
                     .then_zip(expr)
                     .then_or_none_zip(|p| comma(p).then(expr).or_none())
                     .then_zip(do_t).take_left()
@@ -482,6 +481,38 @@ mod tests {
 
     fn p(src: &str) -> LuaParser {
         LuaParser::new(src).unwrap()
+    }
+
+    #[test]
+    fn block_test() {
+        expect_pos(p("; return ;").block(0), 3);
+        expect_pos(p("; return >=;").block(0), 4);
+        expect_pos(p("; return >=, >= ;").block(0), 6);
+        expect_pos(p("goto a return >=, >= ;").block(0), 7);
+    }
+    #[test]
+    fn statement_test() {
+        expect_pos(p(";").statement(0), 1);
+        expect_pos(p("a = >=").statement(0), 3);
+        expect_pos(p("a,b = >=,>=").statement(0), 7);
+        expect_pos(p("a:a(>=)").statement(0), 6);
+        expect_pos(p("::q::").statement(0), 3);
+        expect_pos(p("break").statement(0), 1);
+        expect_pos(p("goto to").statement(0), 2);
+        expect_pos(p("do a = >= ; :: q :: end").statement(0), 9);
+        expect_pos(p("while >= do a = >= ; :: q :: end").statement(0), 11);
+        expect_pos(p("repeat a = >= ; :: q :: until >= ").statement(0), 10);
+        expect_pos(p("if >= then ::q:: ; end  ").statement(0), 8);
+        expect_pos(p("if >= then ::q:: ; else ; end  ").statement(0), 10);
+        expect_pos(p("if >= then ::q:: ; elseif >= then ; else ; end  ").statement(0), 14);
+        expect_pos(p("for x = >= , >= do ; end").statement(0), 9);
+        expect_pos(p("for x = >= , >= , >= do ; end").statement(0), 11);
+        expect_pos(p("for x in >= do ; end").statement(0), 7);
+        expect_pos(p("for x,y in >=, >=  do ; end").statement(0), 11);
+        expect_pos(p("function x.y:z(a) ; end").statement(0), 11);
+        expect_pos(p("local function x(a) ; end").statement(0), 8);
+        expect_pos(p("local x<y>").statement(0), 5);
+        expect_pos(p("local x<y> = >=").statement(0), 7);
     }
 
     #[test]
