@@ -28,18 +28,34 @@ pub struct Nil;
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Bool { True, False }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expression<'a> {
-    E(&'a str)
+    E(&'a str),
+    Nil,
+    False,
+    True,
+    Number(Number),
+    Text(Text<'a>),
+    VarArgs,
+    FnDef(FnParams<'a>,Block<'a>),
+    PrefixExpr(Box<FnCall<'a>>),
+    TableConstructor(TableConst<'a>),
+    StringConcat(Box<Expression<'a>>,Box<Expression<'a>>),
+    Unary(UnaryType, Box<Expression<'a>>)
+}
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum UnaryType {
+    Not,Hash,Minus,Tilde
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum FieldKey<'a> {
     Expr(Expression<'a>),
     Id(Id<'a>),
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Field<'a> {
     Pair(FieldKey<'a>, Expression<'a>),
     Value(Expression<'a>),

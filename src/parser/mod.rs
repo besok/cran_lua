@@ -46,17 +46,14 @@ impl<'a> LuaParser<'a> {
             let pair_expr_as_key = |p| {
                 token!(self.t(p) => Token::LBrack)
                     .then(|p| self.expr(p))
-                    .then_zip(|p| token!(self.t(p) => Token::RBrack))
-                    .take_left()
-                    .then_zip(|p| token!(self.t(p) => Token::Assign))
-                    .take_left()
+                    .then_skip(|p| token!(self.t(p) => Token::RBrack))
+                    .then_skip(|p| token!(self.t(p) => Token::Assign))
                     .then_zip(|p| self.expr(p))
                     .map(|(k, v)| Field::Pair(FieldKey::Expr(k), v))
             };
             let pair_id_as_key = |p| {
                 self.id(p)
-                    .then_zip(|p| token!(self.t(p) => Token::Assign))
-                    .take_left()
+                    .then_skip(|p| token!(self.t(p) => Token::Assign))
                     .then_zip(|p| self.expr(p))
                     .map(|(id, v)| Field::Pair(FieldKey::Id(id), v))
             };
@@ -157,8 +154,7 @@ impl<'a> LuaParser<'a> {
         let args = |p| {
             let expr_args = token!(self.t(p) => Token::LParen)
                 .then_or_default(|p| self.expr_list(p))
-                .then_zip(|p| token!(self.t(p) => Token::RParen))
-                .take_left()
+                .then_skip(|p| token!(self.t(p) => Token::RParen))
                 .map(Args::Expressions);
 
 
@@ -279,7 +275,7 @@ impl<'a> LuaParser<'a> {
         let empty = |p: usize| token!(self.t(p) => Token::Semi => Statement::Empty);
         let assignment = |p: usize| {
             self.var_list(p)
-                .then_zip(assign).take_left()
+                .then_skip(assign)
                 .then_zip(|p| self.expr_list(p))
                 .map(|(vs, es)| Statement::Assignment(vs, es))
         };
@@ -312,8 +308,7 @@ impl<'a> LuaParser<'a> {
 
             repeat_t(p)
                 .then(block)
-                .then_zip(until_t)
-                .take_left()
+                .then_skip(until_t)
                 .then_zip(expr)
                 .map(|(body, until)| Statement::Repeat(Repeat { until, body }))
         };
@@ -340,8 +335,7 @@ impl<'a> LuaParser<'a> {
             if_main(p)
                 .then_multi_zip(else_if)
                 .then_or_none_zip(|p| else_b(p).or_none())
-                .then_zip(end_t)
-                .take_left()
+                .then_skip(end_t)
                 .map(|((main, elseifs), else_opt)| {
                     if let Some(opt) = else_opt {
                         Statement::If(If::IfElse(main, elseifs, opt))
@@ -362,14 +356,14 @@ impl<'a> LuaParser<'a> {
             let plain = |p: usize| {
                 for_t(p)
                     .then(id)
-                    .then_zip(assign).take_left()
+                    .then_skip(assign)
                     .then_zip(expr)
-                    .then_zip(comma).take_left()
+                    .then_skip(comma)
                     .then_zip(expr)
                     .then_or_none_zip(|p| comma(p).then(expr).or_none())
-                    .then_zip(do_t).take_left()
+                    .then_skip(do_t)
                     .then_zip(block)
-                    .then_zip(end_t).take_left()
+                    .then_skip(end_t)
                     .map(|(((init, border), step), body)|
                         Statement::For(For::Plain(PlainFor {
                             init,
@@ -381,11 +375,11 @@ impl<'a> LuaParser<'a> {
             let col = |p: usize| {
                 for_t(p)
                     .then(names)
-                    .then_zip(in_t).take_left()
+                    .then_skip(in_t)
                     .then_zip(exprs)
-                    .then_zip(do_t).take_left()
+                    .then_skip(do_t)
                     .then_zip(block)
-                    .then_zip(end_t).take_left()
+                    .then_skip(end_t)
                     .map(|((names, expressions), body)|
                         Statement::For(For::ForCol(ExprFor {
                             names,
@@ -405,8 +399,7 @@ impl<'a> LuaParser<'a> {
                 .then(fn_name)
                 .then_zip(fn_params)
                 .then_zip(block)
-                .then_zip(end_t)
-                .take_left()
+                .then_skip(end_t)
                 .map(|((name, params), body)| Statement::FnDef(FnDef {
                     name,
                     params,
@@ -422,8 +415,7 @@ impl<'a> LuaParser<'a> {
                 .then(name)
                 .then_zip(fn_params)
                 .then_zip(block)
-                .then_zip(end_t)
-                .take_left()
+                .then_skip(end_t)
                 .map(|((name, params), body)| Statement::LocalFnDef(FnDef {
                     name: FnName { names: vec![name], with_self: false },
                     params,
@@ -436,8 +428,8 @@ impl<'a> LuaParser<'a> {
             let exprs = |p: usize| self.expr_list(p);
 
             local(p).then(attr_names)
-                .then_or_default_zip(|p|assign(p).then(exprs))
-                .map(|(attrs,exprs)|Statement::LocalAttrNames(attrs,exprs))
+                .then_or_default_zip(|p| assign(p).then(exprs))
+                .map(|(attrs, exprs)| Statement::LocalAttrNames(attrs, exprs))
         };
 
         empty(pos).or_from(pos)
@@ -455,9 +447,39 @@ impl<'a> LuaParser<'a> {
             .or(local_function)
             .or(local_attrs)
             .into()
+    }
 
+    fn atom_expression(&'a self, pos: usize) -> Step<'a, Expression<'a>> {
+        let primitive = |p: usize|
+            token!(self.t(p) =>
+                        Token::True => Expression::True,
+                        Token::False => Expression::False,
+                        Token::Nil => Expression::Nil,
+                        Token::EllipsisOut => Expression::VarArgs)
+                .or(|p| self.text(p).map(Expression::Text))
+                .or(|p| self.number(p).map(Expression::Number));
+
+        let fn_def = |p: usize|
+            token!(self.t(p) => Token::Function)
+                .then(|p| self.fn_params(p))
+                .then_zip(|p| self.block(p))
+                .then_skip(|p| token!(self.t(p) => Token::End))
+                .map(|(params, body)| Expression::FnDef(params, body));
+
+        let prefix_expr = |p: usize| {
+            self.var_or_expr(p)
+                .then_zip(|p| self.p.one_or_more(p, |p| self.name_args(p)))
+                .map(|(head, args)| Expression::PrefixExpr(Box::new(FnCall { head, args })))
+        };
+        primitive(pos)
+            .or_from(pos)
+            .or(fn_def)
+            .or(prefix_expr)
+            .or(|p| self.table_const(p).map(Expression::TableConstructor))
+            .into()
     }
 }
+
 
 impl<'a> LuaParser<'a> {
     pub fn new(src: &'a str) -> Result<Self, ParseError> {
@@ -484,12 +506,21 @@ mod tests {
     }
 
     #[test]
+    fn atom_expr_test() {
+        expect_pos(p("true").atom_expression(0), 1);
+        expect_pos(p("false").atom_expression(0), 1);
+        expect_pos(p("nil").atom_expression(0), 1);
+        expect_pos(p("function() return  >= end").atom_expression(0), 6);
+    }
+
+    #[test]
     fn block_test() {
         expect_pos(p("; return ;").block(0), 3);
         expect_pos(p("; return >=;").block(0), 4);
         expect_pos(p("; return >=, >= ;").block(0), 6);
         expect_pos(p("goto a return >=, >= ;").block(0), 7);
     }
+
     #[test]
     fn statement_test() {
         expect_pos(p(";").statement(0), 1);
