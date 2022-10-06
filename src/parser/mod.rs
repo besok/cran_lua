@@ -3,11 +3,12 @@ use parsit::parser::ParseIt;
 use parsit::step::Step;
 use parsit::{seq, token, wrap};
 use parsit::parser::EmptyToken;
-use crate::parser::ast::{Args, AttrName, Block, Bool, Expression, ExprFor, Field, FieldKey, FnCall, FnDef, FnName, FnParams, For, Id, If, IfBranch, NameArgs, Nil, Number, PlainFor, Repeat, Statement, Suffix, TableConst, Text, Var, VarHead, VarOrExpr, VarSuffix, While};
+use crate::parser::ast::*;
 use crate::parser::tokens::Token;
 
 mod tokens;
 mod ast;
+mod expression;
 
 struct LuaParser<'a> {
     p: ParseIt<'a, Token<'a>>,
@@ -33,7 +34,36 @@ impl<'a> LuaParser<'a> {
         token!(self.t(pos) =>Token::Digit(n) => *n)
     }
     fn expr(&'a self, pos: usize) -> Step<'a, Expression<'a>> {
-        token!(self.t(pos) =>Token::Ge => Expression::E(""))
+        let atom = |p: usize| { self.atom_expression(p) };
+        let sign = |p: usize| {
+            token!(self.t(p) =>
+                    Token::Mult => BinaryType::Mult,
+                    Token::Div => BinaryType::Div,
+                    Token::FDiv => BinaryType::FDiv,
+                    Token::Mod => BinaryType::Mod,
+                    Token::Plus => BinaryType::Add,
+                    Token::EllipsisIn => BinaryType::Concat,
+                    Token::Gt => BinaryType::Gt,
+                    Token::Lt => BinaryType::Lt,
+                    Token::Ge => BinaryType::Ge,
+                    Token::Le => BinaryType::Le,
+                    Token::Eq => BinaryType::Eq,
+                    Token::TEq => BinaryType::TEq,
+                    Token::And => BinaryType::And,
+                    Token::Or => BinaryType::Or,
+                    Token::LShift => BinaryType::LShift,
+                    Token::RShift => BinaryType::RShift,
+                    Token::Ampersand => BinaryType::Amper,
+                    Token::Stick => BinaryType::Stick,
+                    Token::Tilde => BinaryType::Tilde,
+                    Token::Minus => BinaryType::Sub,
+                    Token::Caret => BinaryType::Pov
+                )
+        };
+
+        atom(pos)
+            .then_multi_zip(|p| sign(p).then_zip(atom))
+            .map(|(first, others)| Expression::fold(first, others))
     }
 
     fn table_const(&'a self, pos: usize) -> Step<'a, TableConst<'a>> {
@@ -471,10 +501,22 @@ impl<'a> LuaParser<'a> {
                 .then_zip(|p| self.p.one_or_more(p, |p| self.name_args(p)))
                 .map(|(head, args)| Expression::PrefixExpr(Box::new(FnCall { head, args })))
         };
+
+        let unary = |p: usize| {
+            token!(self.t(p) =>
+                    Token::Not => UnaryType::Not,
+                    Token::Hash => UnaryType::Hash,
+                    Token::Tilde => UnaryType::Tilde,
+                    Token::Minus => UnaryType::Minus)
+                .then_zip(|p| self.expr(p))
+                .map(|(t, e)| Expression::Unary(t, Box::new(e)))
+        };
+
         primitive(pos)
             .or_from(pos)
             .or(fn_def)
             .or(prefix_expr)
+            .or(unary)
             .or(|p| self.table_const(p).map(Expression::TableConstructor))
             .into()
     }
@@ -496,7 +538,7 @@ impl<'a> LuaParser<'a> {
 mod tests {
     use parsit::step::Step;
     use parsit::test::parser_test::*;
-    use crate::parser::ast::{Expression, Field, FieldKey, FnParams, Id, TableConst, Text};
+    use crate::parser::ast::{Expression, Field, FieldKey, FnParams, Id, Number, TableConst, Text};
     use crate::parser::ast::Field::{Pair, Value};
     use crate::parser::LuaParser;
     use crate::parser::tokens::Token;
@@ -508,17 +550,24 @@ mod tests {
     #[test]
     fn atom_expr_test() {
         expect_pos(p("true").atom_expression(0), 1);
+        expect_pos(p("1").atom_expression(0), 1);
         expect_pos(p("false").atom_expression(0), 1);
         expect_pos(p("nil").atom_expression(0), 1);
-        expect_pos(p("function() return  >= end").atom_expression(0), 6);
+        expect_pos(p("function() return  0 end").atom_expression(0), 6);
+    }
+
+    #[test]
+    fn expr_test() {
+        expect_pos(p("1").expr(0), 1);
+        // expect_pos(p("1 * 2").expr(0), 3);
     }
 
     #[test]
     fn block_test() {
         expect_pos(p("; return ;").block(0), 3);
-        expect_pos(p("; return >=;").block(0), 4);
-        expect_pos(p("; return >=, >= ;").block(0), 6);
-        expect_pos(p("goto a return >=, >= ;").block(0), 7);
+        expect_pos(p("; return 1;").block(0), 4);
+        expect_pos(p("; return true, 2 ;").block(0), 6);
+        expect_pos(p("goto a return 1, 0 ;").block(0), 7);
     }
 
     #[test]
@@ -572,30 +621,11 @@ mod tests {
 
     #[test]
     fn table_constructor_test() {
-        expect(p("{}").table_const(0), TableConst { fields: vec![] });
-        expect(p("{>=}").table_const(0), TableConst { fields: vec![Value(Expression::E(""))] });
-        expect(p("{some_id = >=}").table_const(0),
-               TableConst {
-                   fields: vec![
-                       Pair(FieldKey::Id(Id { v: "some_id" }), Expression::E(""))
-                   ]
-               });
-        expect(p("{[>=] = >=}").table_const(0),
-               TableConst {
-                   fields: vec![
-                       Pair(FieldKey::Expr(Expression::E("")), Expression::E(""))
-                   ]
-               });
-        expect(p("{>= ; [>=] = >= ; [>=] = >=, [>=] = >=,some_id = >= }").table_const(0),
-               TableConst {
-                   fields: vec![
-                       Value(Expression::E("")),
-                       Pair(FieldKey::Expr(Expression::E("")), Expression::E("")),
-                       Pair(FieldKey::Expr(Expression::E("")), Expression::E("")),
-                       Pair(FieldKey::Expr(Expression::E("")), Expression::E("")),
-                       Pair(FieldKey::Id(Id { v: "some_id" }), Expression::E("")),
-                   ]
-               });
+        expect_pos(p("{}").table_const(0), 2);
+        expect_pos(p("{>=}").table_const(0), 3);
+        expect_pos(p("{some_id = >=}").table_const(0), 5);
+        expect_pos(p("{[>=] = >=}").table_const(0), 7);
+        expect_pos(p("{>= ; [>=] = >= ; [>=] = >=, [>=] = >=,some_id = >= }").table_const(0), 25);
     }
 
     #[test]
@@ -643,10 +673,6 @@ mod tests {
         expect_pos(p("{[>=] = >=}").name_args(0), 7);
     }
 
-    #[test]
-    fn expr_test() {
-        expect(p(">=").expr(0), Expression::E(""))
-    }
 
     #[test]
     fn fn_name_test() {

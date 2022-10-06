@@ -155,7 +155,6 @@ pub enum Token<'a> {
     Error,
 }
 
-
 fn parse_line_comment<'a>(lexer: &mut Lexer<'a, Token<'a>>) -> FilterResult<()> {
     let prefix: &str = lexer.slice();
     let suffix = prefix.replace("[", "]");

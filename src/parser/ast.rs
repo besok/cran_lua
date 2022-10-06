@@ -1,3 +1,9 @@
+use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
+use std::iter::Map;
+use BinaryType::*;
+use crate::parser::expression::fold_with_priority;
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Id<'a> {
     pub v: &'a str,
@@ -30,23 +36,62 @@ pub enum Bool { True, False }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression<'a> {
-    E(&'a str),
     Nil,
     False,
     True,
     Number(Number),
     Text(Text<'a>),
     VarArgs,
-    FnDef(FnParams<'a>,Block<'a>),
+    FnDef(FnParams<'a>, Block<'a>),
     PrefixExpr(Box<FnCall<'a>>),
     TableConstructor(TableConst<'a>),
-    StringConcat(Box<Expression<'a>>,Box<Expression<'a>>),
-    Unary(UnaryType, Box<Expression<'a>>)
+    Unary(UnaryType, Box<Expression<'a>>),
+    Binary(Box<Expression<'a>>, BinaryType, Box<Expression<'a>>),
+
 }
+
+impl<'a> Expression<'a> {
+    pub fn fold(first: Expression<'a>, elems: Vec<(BinaryType, Expression<'a>)>) -> Expression<'a> {
+        fold_with_priority(first, elems)
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum UnaryType {
-    Not,Hash,Minus,Tilde
+    Not,
+    Hash,
+    Minus,
+    Tilde,
 }
+
+
+
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum BinaryType {
+    Mult,
+    Div,
+    Mod,
+    FDiv,
+    Add,
+    Sub,
+    Pov,
+    Concat,
+    Gt,
+    Ge,
+    Lt,
+    Le,
+    Eq,
+    TEq,
+    And,
+    Amper,
+    Stick,
+    Tilde,
+    LShift,
+    RShift,
+    Or,
+}
+
 
 
 #[derive(Debug, Clone, PartialEq)]
