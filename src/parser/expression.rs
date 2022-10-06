@@ -25,6 +25,7 @@ const fn expr_priority(tp: &BinaryType) -> (i32, i32) {
 pub(crate) fn fold_with_priority<'a>(first: Expression<'a>, elems: Vec<(BinaryType, Expression<'a>)>) -> Expression<'a> {
     fold(first, &mut Elems { elems }, 0)
 }
+
 // TODO reverse the vec
 struct Elems<'a> {
     elems: Vec<(BinaryType, Expression<'a>)>,
@@ -48,10 +49,7 @@ fn fold<'a>(lhs: Expression<'a>, elems: &mut Elems<'a>, min_priority: i32) -> Ex
         if l_prior >= min_priority {
             let (tp, rhs) = elems.next();
             let rhs = fold(rhs, elems, r_prior);
-            lhs = Expression::Binary(
-                Box::from(lhs),
-                tp,
-                Box::new(rhs));
+            lhs = Expression::Binary(Box::new(lhs), tp, Box::new(rhs));
         } else { break; }
     }
 

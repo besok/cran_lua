@@ -665,12 +665,12 @@ mod tests {
     fn name_args() {
         expect_pos(p(": name \"a\"").name_args(0), 3);
         expect_pos(p("\"a\"").name_args(0), 1);
-        expect_pos(p(": name (>=,>=)").name_args(0), 7);
-        expect_pos(p(" (>=,>=)").name_args(0), 5);
-        expect_pos(p(": name (>=,>=)").name_args(0), 7);
-        expect_pos(p(" (>=,>=)").name_args(0), 5);
-        expect_pos(p(": name {[>=] = >=}").name_args(0), 9);
-        expect_pos(p("{[>=] = >=}").name_args(0), 7);
+        expect_pos(p(": name (false,nil)").name_args(0), 7);
+        // expect_pos(p(" (a,(false or true))").name_args(0), 5);
+        expect_pos(p(": name (1,2)").name_args(0), 7);
+        expect_pos(p(" (2,3)").name_args(0), 5);
+        expect_pos(p(": name {[1] = 1}").name_args(0), 9);
+        expect_pos(p("{[1] = \"c\"}").name_args(0), 7);
     }
 
 
