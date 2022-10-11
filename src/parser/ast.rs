@@ -261,4 +261,3 @@ pub enum Statement<'a> {
     LocalFnDef(FnDef<'a>),
     LocalAttrNames(Vec<AttrName<'a>>, Vec<Expression<'a>>),
 }
-
