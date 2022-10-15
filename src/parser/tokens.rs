@@ -142,7 +142,8 @@ pub enum Token<'a> {
     EllipsisOut,
 
     #[regex(r"#![^\r\n]*", skip)]
-    #[regex(r"--\[?=*[^=|\[\r\n]*[\r\n]?", skip)]
+    #[regex(r"--[^\[\r\n]*[\r\n]?", skip)]
+    #[regex(r"--\[=*[^\[\r\n]*[\r\n]?", skip)]
     Comment,
 
     #[regex(r"--\[=*\[", parse_line_comment)]
@@ -230,6 +231,9 @@ mod tests {
         text"#, vec![Token::Id("text")]);
 
         lt::expect_succeed::<Token>(r#"--A"#);
+        lt::expect::<Token>(r#"
+          -- ensure_installed = "all", -- one of "all" or a list of languages
+        "#,vec![]);
         lt::expect_succeed::<Token>(r#"--A
         "#);
         lt::expect_succeed::<Token>(r#"--[==

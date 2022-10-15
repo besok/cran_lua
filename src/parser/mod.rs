@@ -34,6 +34,30 @@ impl<'a> LuaParser<'a> {
         token!(self.token(pos) =>Token::Digit(n) => *n)
     }
 
+    fn comma(&self, pos: usize) -> Step<'a, EmptyToken> {
+        token!(self.token(pos) => Token::Comma)
+    }
+    fn semi(&self, pos: usize) -> Step<'a, EmptyToken> {
+        token!(self.token(pos) => Token::Semi)
+    }
+    fn l_br(&self, pos: usize) -> Step<'a, EmptyToken> {
+        token!(self.token(pos) => Token::LBrack)
+    }
+    fn r_br(&self, pos: usize) -> Step<'a, EmptyToken> {
+        token!(self.token(pos) => Token::RBrack)
+    }
+    fn l_pr(&self, pos: usize) -> Step<'a, EmptyToken> {
+        token!(self.token(pos) => Token::LParen)
+    }
+    fn r_pr(&self, pos: usize) -> Step<'a, EmptyToken> {
+        token!(self.token(pos) => Token::RParen)
+    }
+    fn assign(&self, pos: usize) -> Step<'a, EmptyToken> {
+        token!(self.token(pos) => Token::Assign)
+    }
+}
+
+impl<'a> LuaParser<'a> {
     fn expr(&self, pos: usize) -> Step<'a, Expression<'a>> {
         let atom = |p: usize| { self.atom(p) };
         let sign = |p: usize| {
@@ -69,22 +93,21 @@ impl<'a> LuaParser<'a> {
 
     fn table_const(&self, pos: usize) -> Step<'a, TableConst<'a>> {
         let sep = |p| {
-            token!(self.token(p) => Token::Comma)
-                .or(|p| token!(self.token(p) => Token::Semi))
+            self.comma(p).or(|p| self.semi(p))
         };
 
         let field = |p| {
             let pair_expr_as_key = |p| {
-                token!(self.token(p) => Token::LBrack)
+                self.l_br(p)
                     .then(|p| self.expr(p))
-                    .then_skip(|p| token!(self.token(p) => Token::RBrack))
-                    .then_skip(|p| token!(self.token(p) => Token::Assign))
+                    .then_skip(|p| self.r_br(p))
+                    .then_skip(|p| self.assign(p))
                     .then_zip(|p| self.expr(p))
                     .map(|(k, v)| Field::Pair(FieldKey::Expr(k), v))
             };
             let pair_id_as_key = |p| {
                 self.id(p)
-                    .then_skip(|p| token!(self.token(p) => Token::Assign))
+                    .then_skip(|p| self.assign(p))
                     .then_zip(|p| self.expr(p))
                     .map(|(id, v)| Field::Pair(FieldKey::Id(id), v))
             };
@@ -100,7 +123,7 @@ impl<'a> LuaParser<'a> {
             step
         };
 
-        let fields = |p| seq!(p => field, sep);
+        let fields = |p| seq!(p => field, sep,);
 
         let l_brace = |p: usize| token!(self.token(p) => Token::LBrace);
         let r_brace = |p: usize| token!(self.token(p) => Token::RBrace);
@@ -111,14 +134,14 @@ impl<'a> LuaParser<'a> {
     }
 
     fn names(&self, pos: usize) -> Step<'a, Vec<Id<'a>>> {
-        let comma = |p: usize| token!(self.token(p) => Token::Comma);
+        let comma = |p: usize| self.comma(p);
         let id = |p: usize| self.id(p);
         seq!(pos => id, comma)
     }
 
     fn params(&self, pos: usize) -> Step<'a, FnParams<'a>> {
         let varags = |p: usize|
-            token!(self.token(p) => Token::Comma)
+            self.comma(p)
                 .then(|p| token!(self.token(p) => Token::EllipsisOut))
                 .or_none();
 
@@ -139,17 +162,17 @@ impl<'a> LuaParser<'a> {
 
     fn expr_list(&self, pos: usize) -> Step<'a, Vec<Expression<'a>>> {
         let e = |p: usize| self.expr(p);
-        let comma = |p: usize| token!(self.token(p) => Token::Comma);
+        let comma = |p: usize| self.comma(p);
         seq!(pos => e,comma)
     }
     fn id_list(&self, pos: usize) -> Step<'a, Vec<Id<'a>>> {
         let id = |p: usize| self.id(p);
-        let comma = |p: usize| token!(self.token(p) => Token::Comma);
+        let comma = |p: usize| self.comma(p);
         seq!(pos => id,comma)
     }
     fn var_list(&self, pos: usize) -> Step<'a, Vec<Var<'a>>> {
         let v = |p: usize| self.var(p);
-        let comma = |p: usize| token!(self.token(p) => Token::Comma);
+        let comma = |p: usize| self.comma(p);
         seq!(pos => v,comma)
     }
     fn attr_name_list(&self, pos: usize) -> Step<'a, Vec<AttrName<'a>>> {
@@ -168,14 +191,14 @@ impl<'a> LuaParser<'a> {
                     }
                 })
         };
-        let comma = |p: usize| token!(self.token(p) => Token::Comma);
+        let comma = |p: usize| self.comma(p);
 
         seq!(pos => attr, comma)
     }
 
     fn fn_params(&self, pos: usize) -> Step<'a, FnParams<'a>> {
-        let l = |p: usize| token!(self.token(p) => Token::LParen);
-        let r = |p: usize| token!(self.token(p) => Token::RParen);
+        let l = |p: usize| self.l_pr(p);
+        let r = |p: usize| self.r_pr(p);
         let params = |p: usize| self.params(p);
         let def = FnParams::default();
 
@@ -183,9 +206,9 @@ impl<'a> LuaParser<'a> {
     }
     fn name_args(&self, pos: usize) -> Step<'a, NameArgs<'a>> {
         let args = |p| {
-            let expr_args = token!(self.token(p) => Token::LParen)
+            let expr_args = self.l_pr(p)
                 .then_or_default(|p| self.expr_list(p))
-                .then_skip(|p| token!(self.token(p) => Token::RParen))
+                .then_skip(|p| self.r_pr(p))
                 .map(Args::Expressions);
 
 
@@ -206,8 +229,8 @@ impl<'a> LuaParser<'a> {
         })
     }
     fn var_suffix(&self, pos: usize) -> Step<'a, VarSuffix<'a>> {
-        let lb = |p: usize| token!(self.token(p) => Token::LBrack);
-        let rb = |p: usize| token!(self.token(p) => Token::RBrack);
+        let lb = |p: usize| self.l_br(p);
+        let rb = |p: usize| self.r_br(p);
         let e = |p: usize| self.expr(p);
 
         let expr = |p: usize| wrap!(p => lb;e;rb).map(Suffix::Expr);
@@ -221,8 +244,8 @@ impl<'a> LuaParser<'a> {
             .map(|(a, r)| VarSuffix { var: a, suffix: r })
     }
     fn var(&self, pos: usize) -> Step<'a, Var<'a>> {
-        let lp = |p: usize| token!(self.token(p) => Token::LParen);
-        let rp = |p: usize| token!(self.token(p) => Token::RParen);
+        let lp = |p: usize| self.l_pr(p);
+        let rp = |p: usize| self.r_pr(p);
         let e = |p: usize| self.expr(p);
         let expr = |p: usize| {
             wrap!(p => lp;e;rp)
@@ -237,8 +260,8 @@ impl<'a> LuaParser<'a> {
             .map(|(head, tail)| Var { head, tail })
     }
     fn var_or_expr(&self, pos: usize) -> Step<'a, VarOrExpr<'a>> {
-        let lp = |p: usize| token!(self.token(p) => Token::LParen);
-        let rp = |p: usize| token!(self.token(p) => Token::RParen);
+        let lp = |p: usize| self.l_pr(p);
+        let rp = |p: usize| self.r_pr(p);
         let e = |p: usize| self.expr(p);
         let expr = |p: usize| {
             wrap!(p => lp;e;rp)
@@ -300,7 +323,7 @@ impl<'a> LuaParser<'a> {
         let do_t = |p: usize| token!(self.token(p) => Token::Do);
         let expr = |p: usize| self.expr(p);
         let then_t = |p: usize| token!(self.token(p) => Token::Then);
-        let assign = |p: usize| token!(self.token(p) => Token::Assign);
+        let assign = |p: usize| self.assign(p);
 
         let empty = |p: usize| token!(self.token(p) => Token::Semi => Statement::Empty);
         let assignment = |p: usize| {
@@ -376,7 +399,6 @@ impl<'a> LuaParser<'a> {
         };
 
         let for_s = |p: usize| {
-            let comma = |p: usize| token!(self.token(p) => Token::Comma);
             let for_t = |p: usize| token!(self.token(p) => Token::For);
             let in_t = |p: usize| token!(self.token(p) => Token::In);
             let exprs = |p: usize| self.expr_list(p);
@@ -388,9 +410,9 @@ impl<'a> LuaParser<'a> {
                     .then(id)
                     .then_skip(assign)
                     .then_zip(expr)
-                    .then_skip(comma)
+                    .then_skip(|p: usize| self.comma(p))
                     .then_zip(expr)
-                    .then_or_none_zip(|p| comma(p).then(expr).or_none())
+                    .then_or_none_zip(|p| self.comma(p).then(expr).or_none())
                     .then_skip(do_t)
                     .then_zip(block)
                     .then_skip(end_t)
@@ -454,11 +476,10 @@ impl<'a> LuaParser<'a> {
         };
         let local_attrs = |p: usize| {
             let attr_names = |p: usize| self.attr_name_list(p);
-            let assign = |p: usize| token!(self.token(p) => Token::Assign);
             let exprs = |p: usize| self.expr_list(p);
 
             local(p).then(attr_names)
-                .then_or_default_zip(|p| assign(p).then(exprs))
+                .then_or_default_zip(|p| self.assign(p).then(exprs))
                 .map(|(attrs, exprs)| Statement::LocalAttrNames(attrs, exprs))
         };
 
@@ -500,7 +521,8 @@ impl<'a> LuaParser<'a> {
         let prefix_expr = |p: usize| {
             self.var_or_expr(p)
                 .then_multi_zip(|p| self.name_args(p))
-                .map(|(head, args)| Expression::PrefixExpr(Box::new(FnCall { head, args })))
+                .map(|(head, args)|
+                    Expression::PrefixExpr(Box::new(FnCall { head, args })))
         };
 
         let unary = |p: usize| {
@@ -510,7 +532,8 @@ impl<'a> LuaParser<'a> {
                     Token::Tilde => UnaryType::Tilde,
                     Token::Minus => UnaryType::Minus)
                 .then_zip(|p| self.expr(p))
-                .map(|(t, e)| Expression::Unary(t, Box::new(e)))
+                .map(|(t, e)|
+                    Expression::Unary(t, Box::new(e)))
         };
 
         primitive(pos)
@@ -564,12 +587,26 @@ mod tests {
         expect_pos(p("[[some text ]]").atom(0), 1);
         expect_pos(p("\"sometext\"").atom(0), 1);
         expect_pos(p("function() return 0 end").atom(0), 6);
+        expect_pos(p("function()  end").atom(0), 4);
+        expect_pos(p("not function() end").atom(0), 5);
     }
+
+    #[test]
+    fn atom_prefix_expr_test() {
+        expect_pos(p("name").atom(0), 1);
+        expect_pos(p("name : name (1,2) [function(a);end]").atom(0), 16);
+        expect_pos(p("(x) : name (1,2) [function(a);end] ").atom(0), 18);
+        expect_pos(p("(x) : name (1,2) [function(a);end] : name (1,2) [function(a);end]").atom(0), 33);
+        expect_pos(p("(x){[1] = \"c\"}  ").atom(0), 10);
+        expect_pos(p("(x){[1] = \"c\"}{[1] = \"c\"}  ").atom(0), 17);
+    }
+
     #[test]
     fn names_test() {
         expect_pos(p("a,b").names(0), 3);
         expect_pos(p("a").names(0), 1);
     }
+
     #[test]
     fn expr_test() {
         expect_pos(p("nil").expr(0), 1);
@@ -577,7 +614,12 @@ mod tests {
         expect_pos(p("\"xxx\"").expr(0), 1);
         expect_pos(p("[[some text ]]").expr(0), 1);
         expect_pos(p("...").expr(0), 1);
+        expect_pos(p("1").expr(0), 1);
+        expect_pos(p("id").expr(0), 1);
+        expect_pos(p("id + 1").expr(0), 3);
+        expect_pos(p("a > 0 and (b > 0 or a > b )").expr(0), 13);
     }
+
     #[test]
     fn atom_test() {
         expect_pos(p("function();end").expr(0), 5);
@@ -602,6 +644,7 @@ mod tests {
         expect_pos(p("; return true, 2 ;").block(0), 6);
         expect_pos(p("goto a return 1, 0 ;").block(0), 7);
     }
+
     #[test]
     fn var_or_expr_test() {
         expect_pos(p("(true)").var_or_expr(0), 3);
@@ -611,26 +654,64 @@ mod tests {
     #[test]
     fn statement_test() {
         expect_pos(p(";").statement(0), 1);
-        expect_pos(p("a = >=").statement(0), 3);
-        expect_pos(p("a,b = >=,>=").statement(0), 7);
-        expect_pos(p("a:a(>=)").statement(0), 6);
+        expect_pos(p("a = 1").statement(0), 3);
+        expect_pos(p("a = 1 + 1").statement(0), 5);
+        expect_pos(p("a = 1 + 1  * some_op[1]").statement(0), 10);
+        expect_pos(p("a = (1 + 1)  * some_op[1]").statement(0), 12);
+        expect_pos(p("a,b ={}, some_var[{1}]").statement(0), 13);
+        expect_pos(p("a:a(not a)").statement(0), 7);
         expect_pos(p("::q::").statement(0), 3);
         expect_pos(p("break").statement(0), 1);
         expect_pos(p("goto to").statement(0), 2);
-        expect_pos(p("do a = >= ; :: q :: end").statement(0), 9);
-        expect_pos(p("while >= do a = >= ; :: q :: end").statement(0), 11);
-        expect_pos(p("repeat a = >= ; :: q :: until >= ").statement(0), 10);
-        expect_pos(p("if >= then ::q:: ; end  ").statement(0), 8);
-        expect_pos(p("if >= then ::q:: ; else ; end  ").statement(0), 10);
-        expect_pos(p("if >= then ::q:: ; elseif >= then ; else ; end  ").statement(0), 14);
-        expect_pos(p("for x = >= , >= do ; end").statement(0), 9);
-        expect_pos(p("for x = >= , >= , >= do ; end").statement(0), 11);
-        expect_pos(p("for x in >= do ; end").statement(0), 7);
-        expect_pos(p("for x,y in >=, >=  do ; end").statement(0), 11);
+        expect_pos(p("do ; end").statement(0), 3);
+        expect_pos(p("do return 1 end").statement(0), 4);
+        expect_pos(p(r#"
+        do
+         function name(a)
+           b = a + 1
+           return b
+           end
+        end"#).statement(0), 15);
+        expect_pos(p(r#"
+        while a > b or a == c do a = b + c ; return a; end
+        "#).statement(0), 19);
+        expect_pos(p("repeat a = a + 1  until a < 100 ").statement(0), 10);
+        expect_pos(p("if x then ::q:: ; end  ").statement(0), 8);
+        expect_pos(p("if a > b[0] then return 1 else return 2 end  ").statement(0), 14);
+        expect_pos(p("if a > b[0] then ::q:: ; elseif a == b[0] then ; else ; end  ").statement(0), 24);
+        expect_pos(p("for x = arr[0] , x < 10 do ; end").statement(0), 14);
+        expect_pos(p("for x = 0 , x > 0 , x + 1 do ; end").statement(0), 15);
+        expect_pos(p("for x in arr do ; end").statement(0), 7);
+        expect_pos(p("for x,y in a, b  do ; end").statement(0), 11);
         expect_pos(p("function x.y:z(a) ; end").statement(0), 11);
         expect_pos(p("local function x(a) ; end").statement(0), 8);
         expect_pos(p("local x<y>").statement(0), 5);
-        expect_pos(p("local x<y> = >=").statement(0), 7);
+        expect_pos(p("local x<y> = 1").statement(0), 7);
+    }
+
+    #[test]
+    fn fn_call_test() {
+        // expect_pos(p(
+        //     r#"
+        //     configs.setup()
+        //     "#
+        // ).fn_call(0), 5);
+        // expect_pos(p(
+        //     r#"
+        //     configs.setup({})
+        //     "#
+        // ).fn_call(0), 7);
+        expect_pos(p(
+            r#"
+            configs.setup({
+            ensure_installed = { "lua", "markdown", "markdown_inline", "bash", "python" }, -- put the language you want in this array
+
+            ignore_install = { "" }, -- List of parsers to ignore installing
+            sync_install = false -- install languages synchronously (only applied to `ensure_installed`)
+
+            })
+            "#
+        ).fn_call(0), 7);
     }
 
     #[test]
@@ -664,14 +745,45 @@ mod tests {
         expect_pos(p("{{}}").table_const(0), 4);
         expect_pos(p("{{x = 1}}").table_const(0), 7);
         expect_pos(p("{some_id = function(a);end}").table_const(0), 10);
+        expect_pos(p("{some_id = function(a)end}").table_const(0), 9);
         expect_pos(p("{[\"a\"] = nil}").table_const(0), 7);
         expect_pos(p("{1 ; [1] = 2 ; [3] = function(a);end, [\"z\"] = true or false,some_id = 1 + 2 }")
                        .table_const(0), 34);
     }
+
     #[test]
-    fn var_suffix_test() {
-        expect_pos(p("[x + 1]").var_suffix(0), 2);
+    fn table_const_spec_test() {
+        expect_pos(p(r#"
+{
+    ensure_installed = { "lua", "markdown", "markdown_inline", "bash", "python" }, -- put the language you want in this array
+    -- ensure_installed = "all", -- one of "all" or a list of languages
+    ignore_install = { "" }, -- List of parsers to ignore installing
+    sync_install = false, -- install languages synchronously (only applied to `ensure_installed`)
+
+    highlight = {
+        enable = true, -- false will disable the whole extension
+        disable = { "css" }, -- list of language that will be disabled
+    },
+    autopairs = {
+        enable = true,
+    },
+    indent = { enable = true, disable = { "python", "css" } },
+
+    context_commentstring = {
+        enable = true,
+        enable_autocmd = false,
+    },
+
+}
+        "#).table_const(0), 79);
+
+        expect_pos(p(r#"
+        {
+    ensure_installed = { "lua", "markdown", "markdown_inline", "bash", "python" },
+        }
+        "#).table_const(0), 16);
     }
+
 
     #[test]
     fn params() {
@@ -697,6 +809,7 @@ mod tests {
         expect_pos(p(": name (1,2) : name (3) [function(a);end]").var_suffix(0), 20);
         expect_pos(p("[function(a);end]").var_suffix(0), 8);
         expect_pos(p(".id").var_suffix(0), 2);
+        expect_pos(p("[x + 1]").var_suffix(0), 5);
     }
 
     #[test]
@@ -707,7 +820,7 @@ mod tests {
     }
 
     #[test]
-    fn name_args() {
+    fn name_args_test() {
         expect_pos(p(": name \"a\"").name_args(0), 3);
         expect_pos(p("\"a\"").name_args(0), 1);
         expect_pos(p(": name (false,nil)").name_args(0), 7);
