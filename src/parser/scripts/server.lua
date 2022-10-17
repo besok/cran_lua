@@ -544,7 +544,7 @@ end
 -- Please add your fake upstream above
 function _M.go()
     local action = string.sub(ngx.var.uri, 2)
-    action = string.gsub(action, "[/\\.-]", "_")
+    action = string.gsub(action, "[/\\\.-]", "_")
     if not action or not _M[action] then
         return ngx.exit(404)
     end

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Display, Formatter, write};
 use std::iter::Map;
 use BinaryType::*;
 use crate::parser::expression::fold_with_priority;
@@ -15,6 +15,12 @@ impl<'a> Id<'a> {
     }
 }
 
+impl<'a> Display for Id<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.v)
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Number {
     Int(i64),
@@ -23,16 +29,45 @@ pub enum Number {
     Binary(isize),
 }
 
+impl Display for Number {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Number::Int(v) => write!(f, "{}", v),
+            Number::Float(v) => write!(f, "{}", v),
+            Number::Hex(v) => write!(f, "0x{}", v),
+            Number::Binary(v) => write!(f, "b{}", v),
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Text<'a> {
     pub text: &'a str,
 }
 
+impl<'a> Display for Text<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "\"{}\"", self.text)
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Nil;
 
+impl Display for Nil {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "nil")
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Bool { True, False }
+
+impl Display for Bool {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression<'a> {
@@ -50,6 +85,12 @@ pub enum Expression<'a> {
 
 }
 
+impl<'a> Display for Expression<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+       write!(f,"!")
+    }
+}
+
 impl<'a> Expression<'a> {
     pub fn fold(first: Expression<'a>, elems: Vec<(BinaryType, Expression<'a>)>) -> Expression<'a> {
         fold_with_priority(first, elems)
@@ -63,8 +104,6 @@ pub enum UnaryType {
     Minus,
     Tilde,
 }
-
-
 
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -93,12 +132,12 @@ pub enum BinaryType {
 }
 
 
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldKey<'a> {
     Expr(Expression<'a>),
     Id(Id<'a>),
 }
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Field<'a> {
@@ -106,11 +145,37 @@ pub enum Field<'a> {
     Value(Expression<'a>),
 }
 
+impl<'a> Display for Field<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Field::Pair(FieldKey::Id(id), e) => write!(f, "{} = {}", id, e),
+            Field::Pair(FieldKey::Expr(e), ev) => write!(f, "[{}] = {}", e, ev),
+            Field::Value(e) => write!(f, "{}", e)
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum FnParams<'a> {
     Args(Vec<Id<'a>>),
     VarArgs,
     WithVarArgs(Vec<Id<'a>>),
+}
+
+impl<'a> Display for FnParams<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FnParams::Args(args) => {
+                let args: Vec<String> = args.iter().map(|id| format!("{}", id)).collect();
+                write!(f, "({},...)", args.join(","))
+            }
+            FnParams::VarArgs => write!(f, "(...)"),
+            FnParams::WithVarArgs(args) => {
+                let args: Vec<String> = args.iter().map(|id| format!("{}", id)).collect();
+                write!(f, "({},...)", args.join(","))
+            }
+        }
+    }
 }
 
 impl<'a> Default for FnParams<'a> {
@@ -122,6 +187,13 @@ impl<'a> Default for FnParams<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableConst<'a> {
     pub fields: Vec<Field<'a>>,
+}
+
+impl<'a> Display for TableConst<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let args: Vec<String> = self.fields.iter().map(|id| format!("{}", id)).collect();
+        write!(f, "{{{}}}", args.join(","))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -260,4 +332,33 @@ pub enum Statement<'a> {
     FnDef(FnDef<'a>),
     LocalFnDef(FnDef<'a>),
     LocalAttrNames(Vec<AttrName<'a>>, Vec<Expression<'a>>),
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fmt::Display;
+    use crate::parser::ast::{Expression, Field, FieldKey, FnParams, Id, TableConst, Text};
+
+    fn display<T: Display>(v: &T, expect: &str) {
+        assert_eq!(format!("{}", v), expect)
+    }
+
+    #[test]
+    fn fn_param_display_test() {
+        display(
+            &FnParams::WithVarArgs(vec![Id { v: "a" }, Id { v: "b" }]),
+            "(a,b,...)",
+        )
+    }
+    #[test]
+    fn table_constr_display_test() {
+        display(
+            &TableConst{ fields: vec![
+                Field::Value(Expression::Nil),
+                Field::Pair(FieldKey::Id(Id{ v: "a" }),Expression::Text(Text{ text: "t" })),
+                Field::Pair(FieldKey::Expr(Expression::True),Expression::Text(Text{ text: "t" })),
+            ] },
+            "{!,a = !,[!] = !}",
+        )
+    }
 }

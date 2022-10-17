@@ -73,16 +73,6 @@ pub(crate) fn print(expr: &Expression) -> String {
     }
 }
 
-impl Display for Number {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Number::Int(i) => f.write_str(format!("{}", i).as_str()),
-            Number::Float(n) => f.write_str(format!("{}", n).as_str()),
-            Number::Hex(n) => f.write_str(format!("{}", n).as_str()),
-            Number::Binary(n) => f.write_str(format!("{}", n).as_str()),
-        }
-    }
-}
 
 impl Display for BinaryType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {

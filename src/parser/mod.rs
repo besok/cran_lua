@@ -10,6 +10,7 @@ mod tokens;
 mod ast;
 mod expression;
 
+
 struct LuaParser<'a> {
     delegate: ParseIt<'a, Token<'a>>,
 }
@@ -560,7 +561,7 @@ impl<'a> LuaParser<'a> {
         let parser = LuaParser::new(src)?;
         parser
             .delegate
-            .validate_eof(parser.block(0).print())
+            .validate_eof(parser.block(0))
             .into()
     }
 }
@@ -843,7 +844,14 @@ mod tests {
     #[test]
     fn script_test() {
         let script: &str = include_str!("scripts/treesetter.lua");
-        let parser = LuaParser::parse(script);
-        println!("{:?}", parser);
+        let result = LuaParser::parse(script).unwrap();
+        println!("{:?}",result);
+
+        let script: &str = include_str!("scripts/server.lua");
+        let result = LuaParser::parse(script).unwrap();
+        println!("{:?}",result);
+        let script: &str = include_str!("scripts/lazy.lua");
+        let result = LuaParser::parse(script).unwrap();
+        println!("{:?}",result);
     }
 }

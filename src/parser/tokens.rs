@@ -11,9 +11,9 @@ pub enum Token<'a> {
     #[regex(r"(?&letter)((?&letter)|(?&digit))*")]
     Id(&'a str),
 
-    #[regex(r#""([^"\\]|\\t|\\u|\\n|\\")*""#,parse_qt_lit)]
+    #[regex(r#""(?:[^"\\]|\\.)*""#,parse_qt_lit)]
+    #[regex(r#"'(?:[^'\\]|\\.)*'"#,parse_qt_lit)]
     #[regex(r"\[=*\[", parse_block_text)]
-    #[regex(r#"'([^'\\]|\\t|\\u|\\n|\\')*'"#,parse_qt_lit)]
     StringLit(&'a str),
 
     #[regex(r"-?(?&digit)", number)]
@@ -256,6 +256,9 @@ mod tests {
     }
     #[test]
     fn text() {
+
+        lt::expect::<Token>(r#""[/\\.-]""#,vec![Token::StringLit(r#"[/\\.-]"#)]);
+
         lt::expect::<Token>(r#"
         #! some
         "text""#, vec![Token::StringLit("text")]);
