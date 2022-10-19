@@ -286,14 +286,7 @@ impl<'a> LuaParser<'a> {
 
         seq!(pos => id,c)
             .then_or_none_zip(|p| end(p).or_none())
-            .map(|(mut names, end)| {
-                if let Some(v) = end {
-                    names.push(v);
-                    FnName { names, with_self: true }
-                } else {
-                    FnName { names, with_self: false }
-                }
-            })
+            .map(|(mut names, last)| { FnName { names, last } })
     }
 
     fn block(&self, pos: usize) -> Step<'a, Block<'a>> {
@@ -470,7 +463,7 @@ impl<'a> LuaParser<'a> {
                 .then_zip(block)
                 .then_skip(end_t)
                 .map(|((name, params), body)| Statement::LocalFnDef(FnDef {
-                    name: FnName { names: vec![name], with_self: false },
+                    name: FnName { names: vec![name], last:None },
                     params,
                     body,
                 }))
@@ -843,15 +836,20 @@ mod tests {
 
     #[test]
     fn script_test() {
-        let script: &str = include_str!("scripts/treesetter.lua");
-        let result = LuaParser::parse(script).unwrap();
-        println!("{:?}",result);
+        // let script: &str = include_str!("scripts/treesetter.lua");
+        // let result = LuaParser::parse(script).unwrap();
+        // println!("{:?}", result);
+        //
+        // let script: &str = include_str!("scripts/server.lua");
+        // let result = LuaParser::parse(script).unwrap();
+        // println!("{:?}", result);
+        //
+        // let script: &str = include_str!("scripts/lazy.lua");
+        // let result = LuaParser::parse(script).unwrap();
+        // println!("{:?}", result);
 
-        let script: &str = include_str!("scripts/server.lua");
+        let script: &str = include_str!("scripts/cassandra.lua");
         let result = LuaParser::parse(script).unwrap();
-        println!("{:?}",result);
-        let script: &str = include_str!("scripts/lazy.lua");
-        let result = LuaParser::parse(script).unwrap();
-        println!("{:?}",result);
+        println!("{}", result);
     }
 }
